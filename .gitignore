@@ -2,5 +2,8 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.vscode/
+build/
+dist/
 *.egg-info/
 events*.jsonl

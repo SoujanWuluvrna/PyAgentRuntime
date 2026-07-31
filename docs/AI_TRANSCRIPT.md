@@ -42,6 +42,18 @@ tests, and an architecture/guarantees README.
 8. First test run: 3 passed, 1 failed because seed 42 happened not to inject a
    retry. Searched deterministic seeds, selected seed 0, and retained the test
    assertion that the demo actually exercises retries.
+9. Initialized the repository and created commit `e73dc70`. The author later
+   renamed/moved the working copy from `/Users/soujan/pyagents-exercise` to
+   `/Users/soujan/Soujan-PSI`.
+10. Walked through the agent contract, workflow builder, shared scheduler,
+    executors, deterministic events, delivery guarantee, demo, tests, and a
+    five-minute interview presentation.
+11. Diagnosed an import collision with an older package at
+    `/Users/soujan/Downloads/PSI_Soujan`. Recreated the non-relocatable virtual
+    environment after the project move, installed this repository in editable
+    mode, configured the local VS Code interpreter, and verified all six tests.
+12. Explained that `source` and executable commands belong at the shell prompt,
+    not inside Python's `>>>` interactive interpreter.
 
 ## Author review reminder
 
