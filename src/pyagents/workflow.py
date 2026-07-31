@@ -57,6 +57,7 @@ class Workflow:
 
     def then(self, name: str, agent: Agent[Any, Any, Any]) -> Workflow:
         self._claim(name)
+        agent.validate_definition()
         if not _compatible(self._output_type, agent.input_type):
             raise TypeError(
                 f"{name} expects {agent.input_type.__name__}, "
@@ -77,6 +78,7 @@ class Workflow:
         self._claim(name)
         children: list[AgentNode] = []
         for index, agent in enumerate(agents):
+            agent.validate_definition()
             child_name = f"{name}[{index}]"
             self._claim(child_name)
             if not _compatible(self._output_type, agent.input_type):
@@ -86,6 +88,7 @@ class Workflow:
         emitted = agents[0].output_type
         if any(agent.output_type is not emitted for agent in agents[1:]):
             raise TypeError("all fanout agents must emit the same model type")
+        reducer.validate_definition()
         reducer_field = reducer.input_type.model_fields.get("items")
         if reducer_field is None:
             raise TypeError("reducer input model must have an 'items' field")
@@ -97,7 +100,9 @@ class Workflow:
 
         reducer_name = f"{name}.reduce"
         self._claim(reducer_name)
-        self._nodes.append(FanoutNode(name, tuple(children), AgentNode(reducer_name, reducer)))
+        self._nodes.append(
+            FanoutNode(name, tuple(children), AgentNode(reducer_name, reducer))
+        )
         self._output_type = reducer.output_type
         return self
 

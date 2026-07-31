@@ -13,10 +13,12 @@ python -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 
-pyagents-demo --executor local --seed 1 --events events-local.jsonl
-pyagents-demo --executor distributed --seed 1 --events events-distributed.jsonl
+pyagents-demo --executor local --seed 16 --events events-local.jsonl
+pyagents-demo --executor distributed --seed 16 --events events-distributed.jsonl
 diff events-local.jsonl events-distributed.jsonl
 pytest -q
+ruff check src tests
+mypy src/pyagents
 ```
 
 The executor is the only changed line:
@@ -25,7 +27,7 @@ The executor is the only changed line:
 executor = LocalExecutor(sink)
 executor = DistributedExecutor(max_workers=2, sink=sink)
 
-result = await executor.run(build_workflow(), Prompt(text="explain PSI"), seed=1)
+result = await executor.run(build_workflow(), Prompt(text="explain PSI"), seed=16)
 ```
 
 The demo fans one `Prompt` into five `MockLLMAgent` instances and reduces their
@@ -73,9 +75,10 @@ unbounded process creation.
 
 **Timeout cancellation.** Local timeout uses `asyncio.wait_for`, so cancellation
 is cooperative (an agent can suppress `CancelledError`). Distributed timeout
-terminates and joins the attempt's process, providing hard cancellation and no
-contaminated worker to reuse. Fresh processes cost startup time but make the
-failure boundary unusually clear for a small exercise.
+terminates and joins the attempt's process, then escalates to `kill()` after a
+bounded grace interval if it ignores termination. This provides hard
+cancellation and leaves no contaminated worker to reuse. Fresh processes cost
+startup time but make the failure boundary unusually clear for a small exercise.
 
 **Deterministic observability.** Workers return attempt traces; they never write
 the sink. After concurrent branches settle, the parent publishes traces in
@@ -94,8 +97,9 @@ is **not safe for untrusted workers or messages**. A production transport would
 use versioned JSON/MessagePack envelopes plus an agent registry instead of
 shipping Python objects.
 
-An invocation ID is the first 24 hex characters of SHA-256 over the node name,
-fully qualified agent class, and canonical validated input JSON. Retries keep
+An invocation ID is the SHA-256 hex digest of the node name, fully qualified
+agent class, and canonical validated input JSON (including recursively sorted
+mapping keys). Retries keep
 the same ID. Node name distinguishes five instances of the same agent class.
 The ID is an idempotency key, not a result cache.
 
@@ -145,3 +149,6 @@ The architectural choices retained by the author are: parent-owned deterministic
 event ordering, process-per-attempt hard cancellation, Pydantic JSON payloads
 over a trusted pickle transport, and an honest at-least-once guarantee. See
 [`docs/AI_TRANSCRIPT.md`](docs/AI_TRANSCRIPT.md) for the conversation record.
+
+The assignment-to-code traceability matrix is in
+[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).

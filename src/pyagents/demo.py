@@ -6,7 +6,7 @@ import argparse
 import asyncio
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from .agent import Agent, AgentContext, EmptyState, RetryPolicy
 from .events import JsonlEventSink
@@ -39,7 +39,9 @@ class MockLLMAgent(Agent[Prompt, Completion, EmptyState]):
     def __init__(self, label: str) -> None:
         self.label = label
 
-    async def run(self, input: Prompt, state: EmptyState, context: AgentContext) -> Completion:
+    async def run(
+        self, input: Prompt, state: EmptyState, context: AgentContext
+    ) -> Completion:
         # One attempt-local RNG, derived by the runtime from seed/run-id/attempt,
         # makes both injected failures and sleep durations backend-independent.
         should_fail = context.rng.random() < 0.30
@@ -82,7 +84,7 @@ async def run_demo(executor_name: str, event_path: Path, seed: int) -> Combined:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--executor", choices=("local", "distributed"), default="local")
-    parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--seed", type=int, default=16)
     parser.add_argument("--events", type=Path, default=Path("events.jsonl"))
     args = parser.parse_args()
     result = asyncio.run(run_demo(args.executor, args.events, args.seed))

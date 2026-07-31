@@ -9,6 +9,7 @@ import multiprocessing as mp
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from multiprocessing.process import BaseProcess
 from typing import Any
 
 from pydantic import BaseModel
@@ -23,7 +24,7 @@ from .events import (
     RunStarted,
     RunTimedOut,
 )
-from .workflow import AgentNode, FanoutNode, Workflow
+from .workflow import AgentNode, Workflow
 
 
 class AgentExecutionError(RuntimeError):
@@ -62,9 +63,14 @@ def _stable_seed(seed: int, run_id: str, attempt: int) -> int:
 
 def _run_id(node: AgentNode, input_value: BaseModel) -> str:
     identity = f"{node.agent.__class__.__module__}.{node.agent.__class__.__qualname__}"
-    canonical = input_value.model_dump_json(exclude_none=False)
+    canonical = json.dumps(
+        input_value.model_dump(mode="json", exclude_none=False),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     payload = f"{node.name}\0{identity}\0{canonical}".encode()
-    return hashlib.sha256(payload).hexdigest()[:24]
+    return hashlib.sha256(payload).hexdigest()
 
 
 async def _execute_attempt(
@@ -86,8 +92,11 @@ async def _execute_attempt(
         )
         raw_output = await agent.run(typed_input, state, context)
         output = agent.validate_output(raw_output)
-        return _AttemptResult(True, output.model_dump(mode="json"), state.model_dump(mode="json"))
-    except Exception as exc:
+        return _AttemptResult(
+            True, output.model_dump(mode="json"), state.model_dump(mode="json")
+        )
+    # The retry policy deliberately applies to all ordinary agent exceptions.
+    except Exception as exc:  # noqa: BLE001
         return _AttemptResult(
             False,
             None,
@@ -102,7 +111,8 @@ def _process_entry(connection: Any, args: tuple[Any, ...]) -> None:
     try:
         result = asyncio.run(_execute_attempt(*args))
         connection.send(result)
-    except BaseException as exc:
+    # A child must report even SystemExit/KeyboardInterrupt as a failed attempt.
+    except BaseException as exc:  # noqa: BLE001
         connection.send(
             _AttemptResult(False, None, args[2], type(exc).__name__, str(exc))
         )
@@ -126,7 +136,9 @@ class _Executor(ABC):
         attempt: int,
     ) -> _AttemptResult: ...
 
-    async def _invoke(self, node: AgentNode, value: BaseModel, seed: int) -> _InvocationResult:
+    async def _invoke(
+        self, node: AgentNode, value: BaseModel, seed: int
+    ) -> _InvocationResult:
         typed_input = node.agent.validate_input(value.model_dump(mode="json"))
         run_id = _run_id(node, typed_input)
         state = node.agent.initial_state().model_dump(mode="json")
@@ -151,7 +163,9 @@ class _Executor(ABC):
 
             if result.timed_out:
                 trace.append(
-                    _TraceItem("timed_out", attempt, {"timeout_s": node.agent.timeout_s})
+                    _TraceItem(
+                        "timed_out", attempt, {"timeout_s": node.agent.timeout_s}
+                    )
                 )
             else:
                 trace.append(
@@ -177,7 +191,9 @@ class _Executor(ABC):
                 )
         raise AssertionError("unreachable")
 
-    def _emit_trace(self, node: AgentNode, value: BaseModel, trace: tuple[_TraceItem, ...]) -> None:
+    def _emit_trace(
+        self, node: AgentNode, value: BaseModel, trace: tuple[_TraceItem, ...]
+    ) -> None:
         run_id = _run_id(node, node.agent.validate_input(value.model_dump(mode="json")))
         event_types = {
             "started": RunStarted,
@@ -197,7 +213,9 @@ class _Executor(ABC):
             self.sink.emit(event)
             self._sequence += 1
 
-    async def run(self, workflow: Workflow, input: object, *, seed: int = 0) -> BaseModel:
+    async def run(
+        self, workflow: Workflow, input: object, *, seed: int = 0
+    ) -> BaseModel:
         self._sequence = 0
         value = workflow.validate_input(input)
         for node in workflow.nodes:
@@ -216,13 +234,13 @@ class _Executor(ABC):
                 *(self._invoke(child, fanout_input, seed) for child in node.agents),
                 return_exceptions=True,
             )
-            for child, result in zip(node.agents, gathered, strict=True):
-                if isinstance(result, AgentExecutionError):
-                    self._emit_trace(child, fanout_input, result.trace)
-                elif isinstance(result, BaseException):
-                    raise result
+            for child, item in zip(node.agents, gathered, strict=True):
+                if isinstance(item, AgentExecutionError):
+                    self._emit_trace(child, fanout_input, item.trace)
+                elif isinstance(item, BaseException):
+                    raise item
                 else:
-                    self._emit_trace(child, fanout_input, result.trace)
+                    self._emit_trace(child, fanout_input, item.trace)
             failures = [item for item in gathered if isinstance(item, BaseException)]
             if failures:
                 raise failures[0]
@@ -243,8 +261,18 @@ class _Executor(ABC):
 class LocalExecutor(_Executor):
     """Runs attempts as asyncio tasks in this process."""
 
-    async def _attempt(self, agent, input_data, state_data, run_id, seed, attempt):
-        coroutine = _execute_attempt(agent, input_data, state_data, run_id, seed, attempt)
+    async def _attempt(
+        self,
+        agent: Agent[Any, Any, Any],
+        input_data: dict[str, Any],
+        state_data: dict[str, Any],
+        run_id: str,
+        seed: int,
+        attempt: int,
+    ) -> _AttemptResult:
+        coroutine = _execute_attempt(
+            agent, input_data, state_data, run_id, seed, attempt
+        )
         try:
             if agent.timeout_s is None:
                 return await coroutine
@@ -263,27 +291,70 @@ class DistributedExecutor(_Executor):
     substrate and explicit in the README.
     """
 
-    def __init__(self, max_workers: int = 2, sink: EventSink | None = None) -> None:
+    def __init__(
+        self,
+        max_workers: int = 2,
+        sink: EventSink | None = None,
+        *,
+        terminate_grace_s: float = 0.1,
+    ) -> None:
         super().__init__(sink)
         if max_workers < 1:
             raise ValueError("max_workers must be positive")
+        if terminate_grace_s < 0:
+            raise ValueError("terminate_grace_s must be non-negative")
         self._slots = asyncio.Semaphore(max_workers)
         self._context = mp.get_context("spawn")
+        self._terminate_grace_s = terminate_grace_s
 
-    async def _attempt(self, agent, input_data, state_data, run_id, seed, attempt):
+    async def _attempt(
+        self,
+        agent: Agent[Any, Any, Any],
+        input_data: dict[str, Any],
+        state_data: dict[str, Any],
+        run_id: str,
+        seed: int,
+        attempt: int,
+    ) -> _AttemptResult:
         args = (agent, input_data, state_data, run_id, seed, attempt)
         async with self._slots:
-            return await asyncio.to_thread(self._blocking_attempt, args, agent.timeout_s)
+            return await asyncio.to_thread(
+                self._blocking_attempt, args, agent.timeout_s
+            )
 
-    def _blocking_attempt(self, args: tuple[Any, ...], timeout_s: float | None) -> _AttemptResult:
+    def _stop_process(self, process: BaseProcess) -> None:
+        """Stop a worker within a bounded interval, escalating to SIGKILL."""
+        if not process.is_alive():
+            process.join()
+            return
+        process.terminate()
+        process.join(timeout=self._terminate_grace_s)
+        if process.is_alive():
+            process.kill()
+            process.join()
+
+    def _blocking_attempt(
+        self, args: tuple[Any, ...], timeout_s: float | None
+    ) -> _AttemptResult:
         parent, child = self._context.Pipe(duplex=False)
         process = self._context.Process(target=_process_entry, args=(child, args))
-        process.start()
-        child.close()
         try:
+            try:
+                process.start()
+            # multiprocessing may raise several platform/pickling exception types.
+            except Exception as exc:  # noqa: BLE001
+                return _AttemptResult(
+                    False,
+                    None,
+                    args[2],
+                    type(exc).__name__,
+                    f"worker could not start: {exc}",
+                )
+            finally:
+                child.close()
+
             if not parent.poll(timeout_s):
-                process.terminate()
-                process.join()
+                self._stop_process(process)
                 return _AttemptResult(
                     False, None, args[2], "TimeoutError", "attempt timed out", True
                 )
@@ -299,9 +370,16 @@ class DistributedExecutor(_Executor):
                     f"worker exited with code {process.exitcode} without a result",
                 )
             process.join()
+            if not isinstance(result, _AttemptResult):
+                return _AttemptResult(
+                    False,
+                    None,
+                    args[2],
+                    "WorkerProtocolError",
+                    f"worker returned unexpected {type(result).__name__}",
+                )
             return result
         finally:
             parent.close()
             if process.is_alive():
-                process.terminate()
-                process.join()
+                self._stop_process(process)

@@ -1,7 +1,7 @@
-from pydantic import BaseModel
 import pytest
+from pydantic import BaseModel, ValidationError
 
-from pyagents import Agent, AgentContext, Workflow
+from pyagents import Agent, Workflow
 from pyagents.agent import EmptyState
 
 
@@ -27,5 +27,19 @@ def test_rejects_incompatible_sequence_at_build_time():
 
 
 def test_rejects_invalid_workflow_input_at_runtime():
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         Workflow(A).validate_input({"value": 123})
+
+
+class InvalidTimeoutAgent(Agent[A, A, EmptyState]):
+    input_type = A
+    output_type = A
+    timeout_s = 0
+
+    async def run(self, input, state, context):
+        return input
+
+
+def test_rejects_invalid_agent_configuration_at_build_time():
+    with pytest.raises(ValueError, match="timeout_s must be positive"):
+        Workflow(A).then("invalid", InvalidTimeoutAgent())

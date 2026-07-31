@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import threading
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
@@ -44,10 +43,10 @@ class RunTimedOut(_Event):
 
 
 RunEvent = Annotated[
-    Union[RunStarted, RunFinished, RunFailed, RunRetried, RunTimedOut],
+    RunStarted | RunFinished | RunFailed | RunRetried | RunTimedOut,
     Field(discriminator="type"),
 ]
-EVENT_ADAPTER = TypeAdapter(RunEvent)
+EVENT_ADAPTER: TypeAdapter[RunEvent] = TypeAdapter(RunEvent)
 
 
 class EventSink(ABC):
@@ -74,4 +73,3 @@ class JsonlEventSink(EventSink):
         line = EVENT_ADAPTER.dump_json(event).decode() + "\n"
         with self._lock, self.path.open("a", encoding="utf-8") as handle:
             handle.write(line)
-

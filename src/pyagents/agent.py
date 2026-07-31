@@ -50,13 +50,27 @@ class Agent(ABC, Generic[InputT, OutputT, StateT]):
     retry_policy: RetryPolicy = RetryPolicy()
     timeout_s: float | None = None
 
+    @classmethod
+    def validate_definition(cls) -> None:
+        """Fail early when a concrete agent declares an invalid contract."""
+        for attribute in ("input_type", "output_type", "state_type"):
+            model_type = getattr(cls, attribute, None)
+            if not isinstance(model_type, type) or not issubclass(
+                model_type, BaseModel
+            ):
+                raise TypeError(
+                    f"{cls.__name__}.{attribute} must be a Pydantic model class"
+                )
+        if cls.timeout_s is not None and cls.timeout_s <= 0:
+            raise ValueError(f"{cls.__name__}.timeout_s must be positive")
+        if not isinstance(cls.retry_policy, RetryPolicy):
+            raise TypeError(f"{cls.__name__}.retry_policy must be a RetryPolicy")
+
     def initial_state(self) -> StateT:
         return self.state_type.model_validate({})
 
     @abstractmethod
-    async def run(
-        self, input: InputT, state: StateT, context: AgentContext
-    ) -> OutputT:
+    async def run(self, input: InputT, state: StateT, context: AgentContext) -> OutputT:
         """Execute one attempt. State mutations survive later retries locally."""
 
     def validate_input(self, value: object) -> InputT:
@@ -64,4 +78,3 @@ class Agent(ABC, Generic[InputT, OutputT, StateT]):
 
     def validate_output(self, value: object) -> OutputT:
         return self.output_type.model_validate(value)
-
