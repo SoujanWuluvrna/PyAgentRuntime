@@ -1,14 +1,17 @@
-# PyAgentRuntime
+# RunWeave
 
-> **One Workflow. Two Execution Backends. Reliable Agent Orchestration.**
+> **Reliable agent workflows, woven across local and distributed execution.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
 [![Tests](https://img.shields.io/badge/tests-10%20passing-brightgreen)](#verification)
 
-`pyagents` is a compact Python runtime for composing reliable, typed asynchronous
-agent workflows. The same declarative `Workflow` can run locally with `asyncio`
-or across isolated worker processes without changing the workflow definition.
+RunWeave is a compact Python runtime for composing reliable, typed asynchronous
+agent workflows. Define a workflow once, then run it locally with `asyncio` or
+across isolated worker processes without rewriting its business logic.
+
+The installable package is named `pyagents`. RunWeave is the project and
+repository name.
 
 ## Why I built it
 
@@ -25,6 +28,26 @@ readable implementation rather than hiding them behind a large framework.
 - Bounded worker concurrency and hard cancellation of timed-out processes
 - Deterministic retries, invocation IDs, and JSONL event logs
 - Matching observable behavior across both execution backends
+
+## Core idea
+
+```python
+workflow = Workflow(Prompt).fanout_reduce(
+    "llms",
+    [MockLLMAgent(f"model-{index}") for index in range(5)],
+    ConcatenateAgent(),
+)
+
+# Change the executor, not the workflow.
+executor = LocalExecutor(sink)
+# executor = DistributedExecutor(max_workers=2, sink=sink)
+
+result = await executor.run(workflow, Prompt(text="explain agent workflows"))
+```
+
+RunWeave keeps workflow composition separate from execution. Retry behavior,
+timeouts, IDs, type checks, and event ordering therefore remain consistent when
+switching backends.
 
 > **Project status:** Educational prototype. It demonstrates runtime and
 > distributed-systems design decisions, but it is not presented as a
@@ -53,7 +76,9 @@ The executor is the only changed line:
 executor = LocalExecutor(sink)
 executor = DistributedExecutor(max_workers=2, sink=sink)
 
-result = await executor.run(build_workflow(), Prompt(text="explain PSI"), seed=16)
+result = await executor.run(
+    build_workflow(), Prompt(text="explain agent workflows"), seed=16
+)
 ```
 
 The demo fans one `Prompt` into five `MockLLMAgent` instances and reduces their
