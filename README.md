@@ -1,8 +1,32 @@
-# pyagents
+# Soujan PSI — Typed Agent Workflow Runtime
 
-`pyagents` is a deliberately small distributed programming model for typed async
-agents. One declarative `Workflow` runs unchanged through either an asyncio
-`LocalExecutor` or a spawn-based multi-process `DistributedExecutor`.
+[![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![Tests](https://img.shields.io/badge/tests-10%20passing-brightgreen)](#verification)
+
+`pyagents` is a compact Python runtime for composing reliable, typed asynchronous
+agent workflows. The same declarative `Workflow` can run locally with `asyncio`
+or across isolated worker processes without changing the workflow definition.
+
+## Why I built it
+
+Agent demos are easy to create, but reliable execution becomes harder once they
+need parallel work, runtime type safety, retries, timeouts, deterministic logs,
+and process isolation. This project explores those systems concerns in a small,
+readable implementation rather than hiding them behind a large framework.
+
+## What it demonstrates
+
+- Typed agent inputs, outputs, and retry-persistent state with Pydantic
+- Sequential and parallel fanout/reduce workflow composition
+- One workflow API for local and multi-process execution
+- Bounded worker concurrency and hard cancellation of timed-out processes
+- Deterministic retries, invocation IDs, and JSONL event logs
+- Matching observable behavior across both execution backends
+
+> **Project status:** Educational prototype. It demonstrates runtime and
+> distributed-systems design decisions, but it is not presented as a
+> production-ready remote orchestration platform.
 
 ## Quick start
 
@@ -33,6 +57,30 @@ result = await executor.run(build_workflow(), Prompt(text="explain PSI"), seed=1
 The demo fans one `Prompt` into five `MockLLMAgent` instances and reduces their
 five `Completion` models into one `Combined` model. Every attempt has a
 deterministic 30% transient-failure probability and a deterministic short sleep.
+
+```text
+Prompt
+  ├── model-0 ─┐
+  ├── model-1  │
+  ├── model-2  ├── ConcatenateAgent ──> Combined result
+  ├── model-3  │
+  └── model-4 ─┘
+```
+
+The agents intentionally simulate model calls; no API key or paid model service
+is required to run the demo.
+
+## Project structure
+
+```text
+src/pyagents/
+├── agent.py       # Typed agent contract, context, state, and retry policy
+├── workflow.py    # Sequence and fanout/reduce workflow construction
+├── executors.py   # Local and multi-process execution backends
+├── events.py      # Typed events and pluggable event sinks
+└── demo.py        # Deterministic five-agent example
+tests/             # Runtime, failure, timeout, and backend-parity tests
+```
 
 ## One-page architecture
 
@@ -123,6 +171,16 @@ The discriminated Pydantic union contains `RunStarted`, `RunFinished`,
 `RunFailed`, `RunRetried`, and `RunTimedOut`. `JsonlEventSink` is the default;
 `MemoryEventSink` demonstrates pluggability. Error type/message are observable,
 while tracebacks are deliberately excluded from the stable public event schema.
+
+## Verification
+
+The repository is checked with:
+
+```bash
+pytest -q
+ruff check src tests
+mypy src/pyagents
+```
 
 ## Honest scope and TODOs
 
