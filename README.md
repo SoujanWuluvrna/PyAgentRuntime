@@ -141,14 +141,3 @@ while tracebacks are deliberately excluded from the stable public event schema.
 - Retry classification is currently “all exceptions.” Production code needs an
   explicit retryable-error policy and jitter (deterministically sourced in tests).
 - No secrets isolation or sandboxing exists; worker agent code is trusted.
-
-## AI use
-
-OpenAI Codex was used to scaffold, implement, review, and test this exercise.
-The architectural choices retained by the author are: parent-owned deterministic
-event ordering, process-per-attempt hard cancellation, Pydantic JSON payloads
-over a trusted pickle transport, and an honest at-least-once guarantee. See
-[`docs/AI_TRANSCRIPT.md`](docs/AI_TRANSCRIPT.md) for the conversation record.
-
-The assignment-to-code traceability matrix is in
-[`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md).
