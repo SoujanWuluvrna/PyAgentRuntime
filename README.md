@@ -1,4 +1,6 @@
-# Soujan PSI — Typed Agent Workflow Runtime
+# PyAgentRuntime
+
+> **One Workflow. Two Execution Backends. Reliable Agent Orchestration.**
 
 [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Pydantic v2](https://img.shields.io/badge/Pydantic-v2-E92063?logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
